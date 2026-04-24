@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agente Gemini — Pipeline Multi-Agente</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0e14;
+    --bg2:       #0f1520;
+    --bg3:       #151d2e;
+    --border:    #1e2d45;
+    --accent:    #00d4ff;
+    --accent2:   #00ff88;
+    --warn:      #ffb800;
+    --danger:    #ff4466;
+    --text:      #c8d8f0;
+    --text-dim:  #4a6080;
+    --text-mid:  #7a9abf;
+    --mono:      'JetBrains Mono', monospace;
+    --display:   'Syne', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  /* ── GRID NOISE BACKGROUND ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── HEADER ── */
+  header {
+    position: relative; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,14,20,.95);
+    backdrop-filter: blur(8px);
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+  }
+
+  .logo-icon {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+
+  .logo-text {
+    font-family: var(--display);
+    font-weight: 800; font-size: 18px;
+    letter-spacing: -.3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+
+  .logo-sub {
+    font-size: 10px; color: var(--text-dim);
+    letter-spacing: 2px; text-transform: uppercase;
+    font-family: var(--mono);
+  }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 14px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 11px; color: var(--text-mid);
+    letter-spacing: 1px;
+  }
+
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-dim);
+    transition: all .3s;
+  }
+  .status-dot.running { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); animation: pulse 1s infinite; }
+  .status-dot.done    { background: var(--accent2); }
+  .status-dot.error   { background: var(--danger); }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ── MAIN LAYOUT ── */
+  .layout {
+    position: relative; z-index: 1;
+    flex: 1;
+    display: grid;
+    grid-template-columns: 260px 1fr 380px;
+    grid-template-rows: auto 1fr;
+    gap: 0;
+    height: calc(100vh - 63px);
+  }
+
+  /* ── INPUT PANEL (full width top) ── */
+  .input-bar {
+    grid-column: 1 / -1;
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px;
+    background: var(--bg2);
+  }
+
+  .input-label {
+    color: var(--accent); font-size: 11px;
+    letter-spacing: 2px; text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .input-wrap {
+    flex: 1; position: relative;
+  }
+
+  input[type=text] {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
+  }
+
+  input[type=text]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0,212,255,.1);
+  }
+
+  input[type=text]::placeholder { color: var(--text-dim); }
+
+  .btn-run {
+    background: linear-gradient(135deg, var(--accent), #0088aa);
+    border: none; border-radius: 8px;
+    padding: 10px 24px;
+    color: #000; font-family: var(--display);
+    font-size: 13px; font-weight: 700;
+    cursor: pointer; letter-spacing: .5px;
+    white-space: nowrap;
+    transition: opacity .2s, transform .1s;
+  }
+
+  .btn-run:hover   { opacity: .85; }
+  .btn-run:active  { transform: scale(.97); }
+  .btn-run:disabled { opacity: .3; cursor: not-allowed; }
+
+  .btn-clear {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 16px;
+    color: var(--text-dim); font-family: var(--mono);
+    font-size: 12px; cursor: pointer;
+    transition: border-color .2s, color .2s;
+  }
+  .btn-clear:hover { border-color: var(--text-mid); color: var(--text); }
+
+  /* ── AGENTS SIDEBAR ── */
+  .agents-panel {
+    border-right: 1px solid var(--border);
+    padding: 20px 16px;
+    overflow-y: auto;
+    background: var(--bg2);
+  }
+
+  .panel-title {
+    font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--text-dim); margin-bottom: 16px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+
+  .agent-card {
+    border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px;
+    margin-bottom: 10px;
+    background: var(--bg3);
+    transition: border-color .3s, background .3s;
+  }
+
+  .agent-card.active  { border-color: var(--accent); background: rgba(0,212,255,.05); }
+  .agent-card.done    { border-color: var(--accent2); }
+  .agent-card.error   { border-color: var(--danger); }
+
+  .agent-header {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 8px;
+  }
+
+  .agent-emoji { font-size: 18px; }
+
+  .agent-name {
+    font-family: var(--display); font-weight: 600; font-size: 13px;
+    color: var(--text);
+  }
+
+  .agent-badge {
+    margin-left: auto;
+    font-size: 10px; padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .agent-card.active  .agent-badge { background: var(--accent);  color: #000; }
+  .agent-card.done    .agent-badge { background: var(--accent2); color: #000; }
+
+  .agent-role {
+    font-size: 11px; color: var(--text-dim);
+  }
+
+  .agent-tools {
+    margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px;
+  }
+
+  .tool-chip {
+    font-size: 10px; padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text-mid);
+  }
+
+  /* ── LOG PANEL ── */
+  .log-panel {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  .log-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg2);
+  }
+
+  .log-title {
+    font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .log-count {
+    font-size: 11px; color: var(--text-mid);
+  }
+
+  .log-body {
+    flex: 1; overflow-y: auto; padding: 16px 20px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+
+  .log-line {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 5px 10px; border-radius: 6px;
+    animation: fadeIn .2s ease;
+  }
+
+  @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+
+  .log-line:hover { background: rgba(255,255,255,.02); }
+
+  .log-time { color: var(--text-dim); flex-shrink: 0; font-size: 11px; }
+  .log-agent { color: var(--accent); flex-shrink: 0; min-width: 90px; font-size: 11px; }
+  .log-msg   { color: var(--text); font-size: 12px; line-height: 1.5; word-break: break-word; }
+
+  .log-line.tool        .log-msg { color: var(--warn); }
+  .log-line.tool_result .log-msg { color: var(--text-mid); }
+  .log-line.stage_start .log-msg { color: var(--accent); font-weight: 500; }
+  .log-line.stage_done  .log-msg { color: var(--accent2); font-weight: 500; }
+  .log-line.error       .log-msg { color: var(--danger); }
+  .log-line.done        .log-msg { color: var(--accent2); }
+
+  /* ── REPORT PANEL ── */
+  .report-panel {
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    background: var(--bg2);
+  }
+
+  .report-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .report-title {
+    font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .btn-download {
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 12px;
+    color: var(--text-mid); font-size: 11px; cursor: pointer;
+    transition: all .2s; font-family: var(--mono);
+  }
+  .btn-download:hover { border-color: var(--accent2); color: var(--accent2); }
+  .btn-download:disabled { opacity: .3; cursor: not-allowed; }
+
+  .report-body {
+    flex: 1; overflow-y: auto; padding: 20px;
+  }
+
+  /* Markdown render */
+  .report-body h1 {
+    font-family: var(--display); font-size: 18px; font-weight: 800;
+    color: var(--accent); margin-bottom: 8px; line-height: 1.3;
+  }
+  .report-body h2 {
+    font-family: var(--display); font-size: 14px; font-weight: 600;
+    color: var(--accent2); margin: 20px 0 8px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  .report-body h3 {
+    font-size: 13px; color: var(--warn); margin: 14px 0 6px;
+  }
+  .report-body p {
+    color: var(--text); line-height: 1.7; margin-bottom: 10px; font-size: 12px;
+  }
+  .report-body ul, .report-body ol {
+    padding-left: 20px; margin-bottom: 10px;
+  }
+  .report-body li { color: var(--text); line-height: 1.6; font-size: 12px; margin-bottom: 3px; }
+  .report-body strong { color: var(--accent); }
+  .report-body em { color: var(--text-mid); }
+  .report-body code {
+    background: var(--bg3); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 4px; font-size: 11px; color: var(--accent2);
+  }
+  .report-body blockquote {
+    border-left: 3px solid var(--accent); padding-left: 14px;
+    margin: 10px 0; color: var(--text-mid);
+  }
+  .report-body hr {
+    border: none; border-top: 1px solid var(--border); margin: 16px 0;
+  }
+  .report-body table {
+    width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px;
+  }
+  .report-body th {
+    background: var(--bg3); color: var(--accent); padding: 7px 10px;
+    border: 1px solid var(--border); text-align: left;
+  }
+  .report-body td {
+    padding: 7px 10px; border: 1px solid var(--border); color: var(--text);
+  }
+  .report-body tr:hover td { background: rgba(255,255,255,.02); }
+
+  .empty-state {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    color: var(--text-dim);
+  }
+
+  .empty-icon { font-size: 40px; opacity: .3; }
+
+  .empty-text { font-size: 12px; letter-spacing: 1px; text-align: center; line-height: 1.8; }
+
+  /* ── SCROLLBARS ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  /* ── PROGRESS BAR ── */
+  .progress-bar {
+    height: 2px; background: var(--border);
+    grid-column: 1 / -1;
+    position: relative; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width .5s ease;
+  }
+  .progress-fill.indeterminate {
+    width: 30% !important;
+    animation: slide 1.5s infinite;
+  }
+  @keyframes slide { 0%{transform:translateX(-100%)} 100%{transform:translateX(400%)} }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🤖</div>
+    <div>
+      <div class="logo-text">Agente Gemini</div>
+      <div class="logo-sub">Pipeline Multi-Agente</div>
+    </div>
+  </div>
+  <div class="status-pill">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">AGUARDANDO</span>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- INPUT BAR -->
+  <div class="input-bar">
+    <span class="input-label">▸ Tema</span>
+    <div class="input-wrap">
+      <input type="text" id="temaInput"
+             placeholder="Ex: SaaS para barbearias no Nordeste..."
+             onkeydown="if(event.key==='Enter') runPipeline()">
+    </div>
+    <button class="btn-run" id="btnRun" onclick="runPipeline()">▶ Executar</button>
+    <button class="btn-clear" onclick="clearAll()">✕ Limpar</button>
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="progress-bar" style="grid-column:1/-1">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+
+  <!-- AGENTS SIDEBAR -->
+  <div class="agents-panel">
+    <div class="panel-title">Agentes</div>
+
+    <div class="agent-card" id="card-Pesquisador">
+      <div class="agent-header">
+        <span class="agent-emoji">🔍</span>
+        <span class="agent-name">Pesquisador</span>
+        <span class="agent-badge" id="badge-Pesquisador">IDLE</span>
+      </div>
+      <div class="agent-role">Coleta dados na internet</div>
+      <div class="agent-tools">
+        <span class="tool-chip">busca_web</span>
+        <span class="tool-chip">data_hora</span>
+      </div>
+    </div>
+
+    <div class="agent-card" id="card-Analista">
+      <div class="agent-header">
+        <span class="agent-emoji">📊</span>
+        <span class="agent-name">Analista</span>
+        <span class="agent-badge" id="badge-Analista">IDLE</span>
+      </div>
+      <div class="agent-role">Extrai insights e métricas</div>
+      <div class="agent-tools">
+        <span class="tool-chip">analisar_texto</span>
+        <span class="tool-chip">data_hora</span>
+      </div>
+    </div>
+
+    <div class="agent-card" id="card-Redator">
+      <div class="agent-header">
+        <span class="agent-emoji">✍️</span>
+        <span class="agent-name">Redator</span>
+        <span class="agent-badge" id="badge-Redator">IDLE</span>
+      </div>
+      <div class="agent-role">Produz relatório executivo</div>
+      <div class="agent-tools">
+        <span class="tool-chip">salvar_arquivo</span>
+        <span class="tool-chip">data_hora</span>
+      </div>
+    </div>
+
+    <div class="agent-card" id="card-Gerente">
+      <div class="agent-header">
+        <span class="agent-emoji">🎯</span>
+        <span class="agent-name">Gerente</span>
+        <span class="agent-badge" id="badge-Gerente">IDLE</span>
+      </div>
+      <div class="agent-role">Revisão e aprovação final</div>
+      <div class="agent-tools">
+        <span class="tool-chip">salvar_arquivo</span>
+        <span class="tool-chip">data_hora</span>
+      </div>
+    </div>
+
+    <!-- Modelo info -->
+    <div style="margin-top:24px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg3)">
+      <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px">Motor</div>
+      <div style="font-size:12px;color:var(--accent2)">✦ Google Gemini</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="modelInfo">gemini-1.5-flash</div>
+    </div>
+  </div>
+
+  <!-- LOG PANEL -->
+  <div class="log-panel">
+    <div class="log-header">
+      <span class="log-title">Log de Execução</span>
+      <span class="log-count" id="logCount">0 eventos</span>
+    </div>
+    <div class="log-body" id="logBody">
+      <div class="empty-state" id="logEmpty">
+        <div class="empty-icon">⬡</div>
+        <div class="empty-text">Insira um tema e clique em<br>Executar para iniciar o pipeline</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REPORT PANEL -->
+  <div class="report-panel">
+    <div class="report-header">
+      <span class="report-title">Relatório</span>
+      <button class="btn-download" id="btnDownload" disabled onclick="downloadReport()">⬇ Baixar .md</button>
+    </div>
+    <div class="report-body" id="reportBody">
+      <div class="empty-state" id="reportEmpty">
+        <div class="empty-icon">📄</div>
+        <div class="empty-text">O relatório aparecerá aqui<br>após a conclusão do pipeline</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- marked.js for markdown rendering -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script>
+  let evtSource = null;
+  let logCount  = 0;
+  let reportMd  = '';
+  const AGENTS  = ['Pesquisador','Analista','Redator','Gerente'];
+
+  // ── Helpers ──────────────────────────────────────────────────────
+  function now() {
+    return new Date().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+
+  function setStatus(state, text) {
+    const dot  = document.getElementById('statusDot');
+    const txt  = document.getElementById('statusText');
+    dot.className = 'status-dot ' + state;
+    txt.textContent = text;
+  }
+
+  function setProgress(indeterminate, pct=0) {
+    const fill = document.getElementById('progressFill');
+    if (indeterminate) {
+      fill.classList.add('indeterminate');
+    } else {
+      fill.classList.remove('indeterminate');
+      fill.style.width = pct + '%';
+    }
+  }
+
+  function setAgentState(nome, state) {
+    const card  = document.getElementById('card-' + nome);
+    const badge = document.getElementById('badge-' + nome);
+    if (!card) return;
+    card.className  = 'agent-card ' + state;
+    badge.textContent = state === 'active' ? 'ATIVO' : state === 'done' ? 'FEITO' : 'IDLE';
+  }
+
+  function addLog(tipo, agente, msg) {
+    const empty = document.getElementById('logEmpty');
+    if (empty) empty.remove();
+
+    logCount++;
+    document.getElementById('logCount').textContent = logCount + ' eventos';
+
+    const body = document.getElementById('logBody');
+    const line = document.createElement('div');
+    line.className = 'log-line ' + (tipo || 'info');
+    line.innerHTML = `
+      <span class="log-time">${now()}</span>
+      <span class="log-agent">${agente || '—'}</span>
+      <span class="log-msg">${escHtml(msg)}</span>
+    `;
+    body.appendChild(line);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;');
+  }
+
+  function resetAgents() {
+    AGENTS.forEach(a => setAgentState(a, ''));
+  }
+
+  function clearAll() {
+    document.getElementById('logBody').innerHTML =
+      '<div class="empty-state" id="logEmpty"><div class="empty-icon">⬡</div><div class="empty-text">Insira um tema e clique em<br>Executar para iniciar o pipeline</div></div>';
+    document.getElementById('reportBody').innerHTML =
+      '<div class="empty-state" id="reportEmpty"><div class="empty-icon">📄</div><div class="empty-text">O relatório aparecerá aqui<br>após a conclusão do pipeline</div></div>';
+    document.getElementById('btnDownload').disabled = true;
+    logCount = 0;
+    reportMd = '';
+    document.getElementById('logCount').textContent = '0 eventos';
+    setProgress(false, 0);
+    setStatus('', 'AGUARDANDO');
+    resetAgents();
+  }
+
+  // ── Pipeline run ─────────────────────────────────────────────────
+  async function runPipeline() {
+    const tema = document.getElementById('temaInput').value.trim();
+    if (!tema) { document.getElementById('temaInput').focus(); return; }
+
+    document.getElementById('btnRun').disabled = true;
+    setStatus('running', 'EXECUTANDO');
+    setProgress(true);
+    resetAgents();
+    logCount = 0;
+    document.getElementById('logCount').textContent = '0 eventos';
+
+    // Remove empty states
+    const logEmpty = document.getElementById('logEmpty');
+    if (logEmpty) logEmpty.remove();
+
+    addLog('pipeline_start', 'Sistema', `Iniciando pipeline: "${tema}"`);
+
+    // Start SSE before POST
+    startSSE();
+
+    try {
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({tema}),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        addLog('error', 'Sistema', err.error || 'Erro ao iniciar');
+        finishPipeline(false);
+      }
+    } catch(e) {
+      addLog('error', 'Sistema', e.message);
+      finishPipeline(false);
+    }
+  }
+
+  // ── SSE ─────────────────────────────────────────────────────────
+  function startSSE() {
+    if (evtSource) evtSource.close();
+    evtSource = new EventSource('/api/stream');
+
+    const stageDoneCount = { count: 0 };
+
+    evtSource.onmessage = (e) => {
+      let data;
+      try { data = JSON.parse(e.data); } catch { return; }
+
+      const { tipo, agente, emoji, msg } = data;
+
+      if (tipo === 'connected' || tipo === 'ping') return;
+
+      if (tipo === 'end') {
+        evtSource.close();
+        loadReport();
+        finishPipeline(true);
+        return;
+      }
+
+      if (tipo === 'error') {
+        addLog('error', agente || 'Sistema', msg);
+        finishPipeline(false);
+        return;
+      }
+
+      if (tipo === 'stage_start') {
+        setAgentState(agente, 'active');
+        // Deactivate previous
+        const idx = AGENTS.indexOf(agente);
+        if (idx > 0) setAgentState(AGENTS[idx-1], 'done');
+        addLog('stage_start', `${emoji} ${agente}`, '▶ Iniciando...');
+        return;
+      }
+
+      if (tipo === 'stage_done') {
+        setAgentState(agente, 'done');
+        stageDoneCount.count++;
+        setProgress(false, (stageDoneCount.count / 4) * 100);
+        addLog('stage_done', `${emoji} ${agente}`, '✓ Concluído');
+        return;
+      }
+
+      addLog(tipo, `${emoji||''} ${agente||''}`.trim(), msg);
+    };
+
+    evtSource.onerror = () => { evtSource.close(); };
+  }
+
+  function finishPipeline(success) {
+    document.getElementById('btnRun').disabled = false;
+    setStatus(success ? 'done' : 'error', success ? 'CONCLUÍDO' : 'ERRO');
+    if (!success) setProgress(false, 0);
+  }
+
+  // ── Load report ───────────────────────────────────────────────────
+  async function loadReport() {
+    try {
+      const res  = await fetch('/api/report');
+      const data = await res.json();
+      if (data.content) {
+        reportMd = data.content;
+        const body = document.getElementById('reportBody');
+        body.innerHTML = marked.parse(data.content);
+        document.getElementById('btnDownload').disabled = false;
+        addLog('done', '📄 Sistema', `Relatório carregado: ${data.file}`);
+      }
+    } catch(e) {}
+  }
+
+  // ── Download ─────────────────────────────────────────────────────
+  function downloadReport() {
+    if (!reportMd) return;
+    const blob = new Blob([reportMd], {type:'text/markdown'});
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = 'relatorio.md';
+    a.click();
+  }
+</script>
+</body>
+</html>
